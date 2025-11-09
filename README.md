@@ -100,6 +100,7 @@ See below for links to the exact model..
    - Device will reset automatically
    - LED will light up indicating successful boot
 
+<img width="2560" height="1440" alt="{70E19FB4-CC4D-470D-81C9-7A170982CABF}" src="https://github.com/user-attachments/assets/fa3817a6-978e-4d93-a688-fe654d89977e" />
 
 
 ### Troubleshooting Flash Issues
