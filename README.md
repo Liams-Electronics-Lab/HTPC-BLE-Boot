@@ -59,7 +59,7 @@ See below for links to the exact model..
 - HID Descriptor cloning (some devices you may need to clone the BLE devices descriptor and forward to usb host)
 - Connection LED animation toggle
 - Factory reset option
-- Minimum hold time (ms), this is to weed out accidental button presses but requiring all buttons to be held for X amount of time (this is separate to the delay timers in mapping options)
+- Minimum hold time (ms), this is to weed out accidental button presses by requiring all buttons to be held for X amount of time (this is separate to the delay timers in mapping options)
 
 ## Hardware
 
