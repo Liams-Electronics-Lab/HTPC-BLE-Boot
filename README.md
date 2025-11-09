@@ -1,3 +1,8 @@
+
+<img width="1536" height="1024" alt="BCO 399726da-c8d4-4725-9b7a-1a271b4ff4c1" src="https://github.com/user-attachments/assets/39dd7fe9-1ca4-4668-bc38-143ed008f69d" />
+
+
+
 # HTPC-BLEBoot 
 
 ## Overview
