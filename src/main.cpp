@@ -35,6 +35,7 @@ struct ButtonMap {
   uint8_t gpioPin = 2;           // GPIO pin for action 1
   uint8_t gpioMode = 0;          // 0=Toggle, 1=Pull HIGH, 2=Pull LOW (on button release)
   uint16_t ttlMs = 0;            // Time-to-live in ms (0=stay until release, 1-9999=auto-revert)
+  uint8_t gpioTtlBehavior = 0;   // 0=Switch to opposite state after TTL, 1=Float pin after TTL
   bool passToUsb = false;        // Also forward to USB
   uint8_t ledR = 0;              // LED Red (0-255)
   uint8_t ledG = 255;            // LED Green (0-255)
@@ -655,6 +656,14 @@ function renderButtonMaps(maps) {
                  onchange="updateMapAction(${map.idx})" placeholder="0 = hold state forever">
         </label>
         <p style="color:#888;margin:4px 0;font-size:11px">0 = hold forever, 1-9999 = auto-revert after ms</p>
+        <label style="margin-top:8px">After TTL Expires:
+          <select id="gpioTtlBehavior${map.idx}" onchange="updateMapAction(${map.idx})" 
+                  style="width:100%;padding:6px;background:#1d1d1d;color:#eee;border:1px solid #444;border-radius:4px">
+            <option value="0" ${map.gpioTtlBehavior==0?'selected':''}>Switch to opposite state</option>
+            <option value="1" ${map.gpioTtlBehavior==1?'selected':''}>Float pin (INPUT)</option>
+          </select>
+        </label>
+        <p style="color:#888;margin:4px 0;font-size:11px">Opposite = HIGH→LOW or LOW→HIGH, Float = high impedance</p>
       </div>
       <div id="ledColor${map.idx}" style="${map.action==2?'':'display:none'};margin:8px 0">
         <label style="display:flex;align-items:center;gap:8px">
@@ -857,6 +866,7 @@ async function updateMapAction(idx) {
   const action = document.getElementById(`action${idx}`).value;
   const gpioPin = document.getElementById(`gpioPin${idx}`)?.value || 2;
   const gpioMode = document.getElementById(`gpioMode${idx}`)?.value || 0;
+  const gpioTtlBehavior = document.getElementById(`gpioTtlBehavior${idx}`)?.value || 0;
   const passToUsb = document.getElementById(`pass${idx}`).checked;
   
   // Show/hide GPIO field
@@ -920,7 +930,7 @@ async function updateMapAction(idx) {
     }
   }
   
-  await fetch(`/map/update?idx=${idx}&action=${action}&gpio=${gpioPin}&gpioMode=${gpioMode}&ttl=${ttl}&pass=${passToUsb?'1':'0'}&keyCode=${encodeURIComponent(keyCode)}&keyMod=${keyMod}&mediaCode=${encodeURIComponent(mediaCode)}`);
+  await fetch(`/map/update?idx=${idx}&action=${action}&gpio=${gpioPin}&gpioMode=${gpioMode}&gpioTtlBehavior=${gpioTtlBehavior}&ttl=${ttl}&pass=${passToUsb?'1':'0'}&keyCode=${encodeURIComponent(keyCode)}&keyMod=${keyMod}&mediaCode=${encodeURIComponent(mediaCode)}`);
 }
 
 async function updateMapColor(idx, hexColor) {
@@ -947,6 +957,7 @@ async function saveMap(idx) {
   const action = document.getElementById(`action${idx}`).value;
   const gpioPin = document.getElementById(`gpioPin${idx}`)?.value || 2;
   const gpioMode = document.getElementById(`gpioMode${idx}`)?.value || 0;
+  const gpioTtlBehavior = document.getElementById(`gpioTtlBehavior${idx}`)?.value || 0;
   const passToUsb = document.getElementById(`pass${idx}`).checked;
   const useHold = document.getElementById(`useHold${idx}`)?.checked || false;
   const holdSec = document.getElementById(`holdSec${idx}`)?.value || 3;
@@ -986,7 +997,7 @@ async function saveMap(idx) {
     }
   }
   
-  await fetch(`/map/update?idx=${idx}&label=${encodeURIComponent(label)}&action=${action}&gpio=${gpioPin}&gpioMode=${gpioMode}&ttl=${ttl}&useHold=${useHold?'1':'0'}&holdSec=${holdSec}&applyUsb=${applyUsb?'1':'0'}&pass=${passToUsb?'1':'0'}${colorParam}`);
+  await fetch(`/map/update?idx=${idx}&label=${encodeURIComponent(label)}&action=${action}&gpio=${gpioPin}&gpioMode=${gpioMode}&gpioTtlBehavior=${gpioTtlBehavior}&ttl=${ttl}&useHold=${useHold?'1':'0'}&holdSec=${holdSec}&applyUsb=${applyUsb?'1':'0'}&pass=${passToUsb?'1':'0'}${colorParam}`);
   alert('Settings saved!');
 }
 
@@ -1179,7 +1190,7 @@ async function loadInfo(){
   
   const info = document.getElementById('sysInfo');
   info.innerHTML = `
-    <div>Firmware: HTPC-BLEBoot v1.0</div>
+    <div>Firmware: HTPC-BLEBoot v1.01</div>
     <div>Connected: ${s.connected ? 'Yes' : 'No'}</div>
     <div>Active Device: ${s.activeName || 'None'}</div>
     <div>Saved Device: ${s.savedName || 'None'}</div>
@@ -1670,33 +1681,37 @@ static void handleButtonAction(int mapIndex, bool pressed) {
     
     // Execute action on release (if hold time was met or not required)
     if (map->action == 1) {
-      // GPIO control (always executes on release)
-      if (map->gpioMode == 0) {
-        // Toggle mode - use persistent toggle state
-        gpioToggleStates[mapIndex] = !gpioToggleStates[mapIndex];
-        gpioStates[mapIndex] = gpioToggleStates[mapIndex];
-        digitalWrite(map->gpioPin, gpioStates[mapIndex] ? HIGH : LOW);
-        Serial.printf("GPIO%d TOGGLE -> %s", map->gpioPin, gpioStates[mapIndex] ? "HIGH" : "LOW");
-      } else if (map->gpioMode == 1) {
-        // Pull HIGH mode
-        digitalWrite(map->gpioPin, HIGH);
-        gpioStates[mapIndex] = true;
-        Serial.printf("GPIO%d -> HIGH", map->gpioPin);
-      } else if (map->gpioMode == 2) {
-        // Pull LOW mode
-        digitalWrite(map->gpioPin, LOW);
-        gpioStates[mapIndex] = false;
-        Serial.printf("GPIO%d -> LOW", map->gpioPin);
-      }
-      
-      // Start TTL timer if configured
-      if (map->ttlMs > 0) {
-        ttlTimers[mapIndex].active = true;
-        ttlTimers[mapIndex].startTime = millis();
-        ttlTimers[mapIndex].mapIndex = mapIndex;
-        Serial.printf(" (TTL: %dms)\n", map->ttlMs);
-      } else {
-        Serial.println();
+      // GPIO control
+      // If useHoldTime is enabled, GPIO was already executed in loop() when hold time was met
+      if (!map->useHoldTime) {
+        // Execute GPIO immediately on release (no hold time requirement)
+        if (map->gpioMode == 0) {
+          // Toggle mode - use persistent toggle state
+          gpioToggleStates[mapIndex] = !gpioToggleStates[mapIndex];
+          gpioStates[mapIndex] = gpioToggleStates[mapIndex];
+          digitalWrite(map->gpioPin, gpioStates[mapIndex] ? HIGH : LOW);
+          Serial.printf("GPIO%d TOGGLE -> %s", map->gpioPin, gpioStates[mapIndex] ? "HIGH" : "LOW");
+        } else if (map->gpioMode == 1) {
+          // Pull HIGH mode
+          digitalWrite(map->gpioPin, HIGH);
+          gpioStates[mapIndex] = true;
+          Serial.printf("GPIO%d -> HIGH", map->gpioPin);
+        } else if (map->gpioMode == 2) {
+          // Pull LOW mode
+          digitalWrite(map->gpioPin, LOW);
+          gpioStates[mapIndex] = false;
+          Serial.printf("GPIO%d -> LOW", map->gpioPin);
+        }
+        
+        // Start TTL timer if configured
+        if (map->ttlMs > 0) {
+          ttlTimers[mapIndex].active = true;
+          ttlTimers[mapIndex].startTime = millis();
+          ttlTimers[mapIndex].mapIndex = mapIndex;
+          Serial.printf(" (TTL: %dms)\n", map->ttlMs);
+        } else {
+          Serial.println();
+        }
       }
       
       // Handle USB forwarding
@@ -1705,17 +1720,8 @@ static void handleButtonAction(int mapIndex, bool pressed) {
         uint16_t consumerCode = map->payload[0] | (map->payload[1] << 8);
         
         if (map->useHoldTime) {
-          // With hold time enabled
-          if (map->applyToUsb) {
-            // Single send - send once only
-            if (!usbSentOnce[mapIndex]) {
-              usbSendConsumerMomentary(consumerCode);
-              usbSentOnce[mapIndex] = true;
-              Serial.printf("  -> Forwarded original button (0x%04X) to USB [SINGLE]\n", consumerCode);
-            }
-          } else {
-            // Repeat mode - already being sent in loop()
-          }
+          // With hold time enabled - already sent in loop()
+          // Nothing to do here
         } else {
           // Without hold time - send on release
           usbSendConsumerMomentary(consumerCode);
@@ -1863,6 +1869,8 @@ static void notifyCB(NimBLERemoteCharacteristic* chr, uint8_t* data, size_t len,
     prefs.putUChar(key, buttonMaps[learnMapIndex].gpioPin);
     snprintf(key, sizeof(key), "gpioMode%d", learnMapIndex);
     prefs.putUChar(key, buttonMaps[learnMapIndex].gpioMode);
+    snprintf(key, sizeof(key), "gpioTtlBeh%d", learnMapIndex);
+    prefs.putUChar(key, buttonMaps[learnMapIndex].gpioTtlBehavior);
     snprintf(key, sizeof(key), "ttl%d", learnMapIndex);
     prefs.putUShort(key, buttonMaps[learnMapIndex].ttlMs);
     snprintf(key, sizeof(key), "pass%d", learnMapIndex);
@@ -2311,6 +2319,7 @@ static void handleStatus(AsyncWebServerRequest* req) {
     json += "\"action\":" + String(buttonMaps[i].action) + ",";
     json += "\"gpioPin\":" + String(buttonMaps[i].gpioPin) + ",";
     json += "\"gpioMode\":" + String(buttonMaps[i].gpioMode) + ",";
+    json += "\"gpioTtlBehavior\":" + String(buttonMaps[i].gpioTtlBehavior) + ",";
     json += "\"ttlMs\":" + String(buttonMaps[i].ttlMs) + ",";
     json += "\"passToUsb\":" + String(buttonMaps[i].passToUsb?"true":"false") + ",";
     json += "\"useHoldTime\":" + String(buttonMaps[i].useHoldTime?"true":"false") + ",";
@@ -2525,6 +2534,8 @@ void setup() {
       buttonMaps[i].gpioPin = prefs.getUChar(key, 2);
       snprintf(key, sizeof(key), "gpioMode%d", i);
       buttonMaps[i].gpioMode = prefs.getUChar(key, 0);
+      snprintf(key, sizeof(key), "gpioTtlBeh%d", i);
+      buttonMaps[i].gpioTtlBehavior = prefs.getUChar(key, 0);
       snprintf(key, sizeof(key), "ttl%d", i);
       buttonMaps[i].ttlMs = prefs.getUShort(key, 0);
       snprintf(key, sizeof(key), "pass%d", i);
@@ -2758,7 +2769,7 @@ void setup() {
   // Backup all settings (WiFi, maps, input delay) - exclude BLE pairing
   server.on("/advanced/backup", HTTP_GET, [](AsyncWebServerRequest* r){
     String json = "{\"ok\":true,\"backup\":{";
-    json += "\"version\":\"1.0\",";
+    json += "\"version\":\"1.01\",";
     
     // Config settings
     json += "\"config\":{";
@@ -2802,6 +2813,7 @@ void setup() {
       json += "\"action\":" + String(buttonMaps[i].action) + ",";
       json += "\"gpioPin\":" + String(buttonMaps[i].gpioPin) + ",";
       json += "\"gpioMode\":" + String(buttonMaps[i].gpioMode) + ",";
+      json += "\"gpioTtlBehavior\":" + String(buttonMaps[i].gpioTtlBehavior) + ",";
       json += "\"ttlMs\":" + String(buttonMaps[i].ttlMs) + ",";
       json += "\"passToUsb\":" + String(buttonMaps[i].passToUsb ? "true" : "false") + ",";
       json += "\"ledR\":" + String(buttonMaps[i].ledR) + ",";
@@ -2918,6 +2930,7 @@ void setup() {
           map->action = getValue(mapJson, "action").toInt();
           map->gpioPin = getValue(mapJson, "gpioPin").toInt();
           map->gpioMode = getValue(mapJson, "gpioMode").toInt();
+          map->gpioTtlBehavior = getValue(mapJson, "gpioTtlBehavior").toInt();
           map->ttlMs = getValue(mapJson, "ttlMs").toInt();
           map->passToUsb = getValue(mapJson, "passToUsb") == "true";
           map->ledR = getValue(mapJson, "ledR").toInt();
@@ -2944,6 +2957,8 @@ void setup() {
           prefs.putUChar(key, map->gpioPin);
           snprintf(key, sizeof(key), "gpioMode%d", mapIndex);
           prefs.putUChar(key, map->gpioMode);
+          snprintf(key, sizeof(key), "gpioTtlBeh%d", mapIndex);
+          prefs.putUChar(key, map->gpioTtlBehavior);
           snprintf(key, sizeof(key), "ttl%d", mapIndex);
           prefs.putUShort(key, map->ttlMs);
           snprintf(key, sizeof(key), "pass%d", mapIndex);
@@ -3236,6 +3251,15 @@ void setup() {
       }
     }
     
+    if (r->hasParam("gpioTtlBehavior")) {
+      uint8_t behavior = r->getParam("gpioTtlBehavior")->value().toInt();
+      if (behavior <= 1) {
+        buttonMaps[idx].gpioTtlBehavior = behavior;
+        Serial.printf("Map #%d: GPIO TTL behavior set to %s\n", idx, behavior == 0 ? "OPPOSITE" : "FLOAT");
+        changed = true;
+      }
+    }
+    
     if (r->hasParam("ttl")) {
       uint16_t ttl = r->getParam("ttl")->value().toInt();
       if (ttl <= 9999) {
@@ -3309,6 +3333,8 @@ void setup() {
       prefs.putUChar(key, buttonMaps[idx].gpioPin);
       snprintf(key, sizeof(key), "gpioMode%d", idx);
       prefs.putUChar(key, buttonMaps[idx].gpioMode);
+      snprintf(key, sizeof(key), "gpioTtlBeh%d", idx);
+      prefs.putUChar(key, buttonMaps[idx].gpioTtlBehavior);
       snprintf(key, sizeof(key), "ttl%d", idx);
       prefs.putUShort(key, buttonMaps[idx].ttlMs);
       snprintf(key, sizeof(key), "useHold%d", idx);
@@ -3604,8 +3630,53 @@ void loop() {
             usbSendConsumer(buttonMaps[i].mediaCode);
             Serial.printf("Media -> Consumer 0x%04X [REPEAT]\n", buttonMaps[i].mediaCode);
           }
+        } else if (buttonMaps[i].action == 1) {
+          // GPIO action - execute when hold time is met
+          if (buttonMaps[i].gpioMode == 0) {
+            // Toggle mode - use persistent toggle state
+            gpioToggleStates[i] = !gpioToggleStates[i];
+            gpioStates[i] = gpioToggleStates[i];
+            digitalWrite(buttonMaps[i].gpioPin, gpioStates[i] ? HIGH : LOW);
+            Serial.printf("GPIO%d TOGGLE -> %s", buttonMaps[i].gpioPin, gpioStates[i] ? "HIGH" : "LOW");
+          } else if (buttonMaps[i].gpioMode == 1) {
+            // Pull HIGH mode
+            digitalWrite(buttonMaps[i].gpioPin, HIGH);
+            gpioStates[i] = true;
+            Serial.printf("GPIO%d -> HIGH", buttonMaps[i].gpioPin);
+          } else if (buttonMaps[i].gpioMode == 2) {
+            // Pull LOW mode
+            digitalWrite(buttonMaps[i].gpioPin, LOW);
+            gpioStates[i] = false;
+            Serial.printf("GPIO%d -> LOW", buttonMaps[i].gpioPin);
+          }
+          
+          // Start TTL timer if configured
+          if (buttonMaps[i].ttlMs > 0) {
+            ttlTimers[i].active = true;
+            ttlTimers[i].startTime = millis();
+            ttlTimers[i].mapIndex = i;
+            Serial.printf(" (TTL: %dms)\n", buttonMaps[i].ttlMs);
+          } else {
+            Serial.println();
+          }
+          
+          // Handle USB forwarding
+          if (buttonMaps[i].passToUsb) {
+            uint16_t consumerCode = buttonMaps[i].payload[0] | (buttonMaps[i].payload[1] << 8);
+            if (buttonMaps[i].applyToUsb) {
+              // Single send mode
+              if (!usbSentOnce[i]) {
+                usbSendConsumerMomentary(consumerCode);
+                usbSentOnce[i] = true;
+                Serial.printf("  -> Forwarded original button (0x%04X) to USB [SINGLE]\n", consumerCode);
+              }
+            } else {
+              // Repeat mode
+              usbSendConsumerMomentary(consumerCode);
+            }
+          }
         }
-        // Note: GPIO action (action == 1) executes on release only
+        // Note: GPIO action now executes when hold time is met (above)
       }
     } else if (buttonPressStates[i].isPressed && buttonPressStates[i].actionTriggered && buttonMaps[i].active && buttonMaps[i].useHoldTime) {
       // Continue sending USB data if in repeat mode (after hold time was already met)
@@ -3666,22 +3737,29 @@ void loop() {
         ttlTimers[i].active = false;
         
         if (buttonMaps[i].action == 1) {
-          // GPIO: Revert to opposite state
-          if (buttonMaps[i].gpioMode == 0) {
-            // Toggle mode - turn OFF (LOW) after TTL expires
-            gpioStates[i] = false;
-            digitalWrite(buttonMaps[i].gpioPin, LOW);
-            Serial.printf("GPIO%d TTL expired -> LOW\n", buttonMaps[i].gpioPin);
-          } else if (buttonMaps[i].gpioMode == 1) {
-            // Pull HIGH mode - revert to LOW
-            digitalWrite(buttonMaps[i].gpioPin, LOW);
-            gpioStates[i] = false;
-            Serial.printf("GPIO%d TTL expired -> LOW\n", buttonMaps[i].gpioPin);
-          } else if (buttonMaps[i].gpioMode == 2) {
-            // Pull LOW mode - revert to HIGH
-            digitalWrite(buttonMaps[i].gpioPin, HIGH);
-            gpioStates[i] = true;
-            Serial.printf("GPIO%d TTL expired -> HIGH\n", buttonMaps[i].gpioPin);
+          // GPIO: Revert based on gpioTtlBehavior setting
+          if (buttonMaps[i].gpioTtlBehavior == 1) {
+            // Float mode - set pin as input with no pull resistors
+            pinMode(buttonMaps[i].gpioPin, INPUT);
+            Serial.printf("GPIO%d TTL expired -> FLOAT (INPUT)\n", buttonMaps[i].gpioPin);
+          } else {
+            // Switch to opposite state (default behavior)
+            if (buttonMaps[i].gpioMode == 0) {
+              // Toggle mode - turn OFF (LOW) after TTL expires
+              gpioStates[i] = false;
+              digitalWrite(buttonMaps[i].gpioPin, LOW);
+              Serial.printf("GPIO%d TTL expired -> LOW\n", buttonMaps[i].gpioPin);
+            } else if (buttonMaps[i].gpioMode == 1) {
+              // Pull HIGH mode - revert to LOW
+              digitalWrite(buttonMaps[i].gpioPin, LOW);
+              gpioStates[i] = false;
+              Serial.printf("GPIO%d TTL expired -> LOW\n", buttonMaps[i].gpioPin);
+            } else if (buttonMaps[i].gpioMode == 2) {
+              // Pull LOW mode - revert to HIGH
+              digitalWrite(buttonMaps[i].gpioPin, HIGH);
+              gpioStates[i] = true;
+              Serial.printf("GPIO%d TTL expired -> HIGH\n", buttonMaps[i].gpioPin);
+            }
           }
         } else if (buttonMaps[i].action == 2) {
           // LED: Turn off
